@@ -1,0 +1,25 @@
+{
+  "name": "zo-element",
+  "version": "0.1.0",
+  "description": "Drop-in live editing element for Zo spaces backed by .zopack.md files",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./live-editor": "./src/live-editor.tsx"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@types/react": "^19.0.0",
+    "hono": "^4.0.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "bun-types": "^1.1.0",
+    "hono": "^4.7.11",
+    "typescript": "^5.9.3"
+  }
+}
