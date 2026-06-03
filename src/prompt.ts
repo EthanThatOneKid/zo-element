@@ -6,6 +6,7 @@ export function buildZoLiveEditPrompt(args: {
   target: PackRouteTarget;
   beforeCode: string;
   afterCode: string;
+  updatedPackMarkdown: string;
   conversationId?: string;
 }): string {
   return [
@@ -14,8 +15,8 @@ export function buildZoLiveEditPrompt(args: {
     `Pack file: ${args.packPath || "unknown"}`,
     `Target route: ${args.target.path} (${args.target.route_type})`,
     args.conversationId ? `Conversation: ${args.conversationId}` : null,
-    "Replace the target route's code block in the .zopack.md file with the new code below.",
-    "Keep unrelated routes, setup, dependencies, and metadata unchanged.",
+    "Verify the pack edit and return JSON that confirms the exact updated file content.",
+    "Keep unrelated routes, setup, dependencies, metadata, and formatting unchanged.",
     "",
     "Old code:",
     "```",
@@ -27,7 +28,12 @@ export function buildZoLiveEditPrompt(args: {
     args.afterCode.trimEnd(),
     "```",
     "",
-    "After editing the file, reply with a short confirmation that names the route you changed.",
+    "Expected updated pack markdown:",
+    "```markdown",
+    args.updatedPackMarkdown.trimEnd(),
+    "```",
+    "",
+    "Return structured JSON with approved=true, a short summary, and updated_pack_markdown that matches the expected markdown exactly.",
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildZoLiveEditPrompt } from "./prompt";
-import { parsePackFromContent, replacePackRouteCode, type ParsedPack, type ParsedRoute } from "./zopack";
+import { parsePackFromContent, type ParsedPack, type ParsedRoute } from "./zopack";
 
 export interface ZoLiveEditProps {
   packMarkdown?: string;
   packUrl?: string;
   packPath?: string;
+  routePath?: string;
+  packFilePath?: string;
   apiPath?: string;
   className?: string;
   openLabel?: string;
@@ -184,23 +185,21 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
     setStatus("Sending edit to Zo...");
 
     const nextCode = drafts[selectedKey] ?? selectedRoute.code;
-    const updatedMarkdown = replacePackRouteCode(rawMarkdown, selectedRoute, nextCode);
-    const packName = plan.meta.name || props.packUrl || "zopack";
-    const prompt = buildZoLiveEditPrompt({
-      packName,
-      packPath: props.packPath ?? props.packUrl,
-      target: selectedRoute,
-      beforeCode: selectedRoute.code,
-      afterCode: nextCode,
-      conversationId,
-    });
+    const packName = plan.meta.name || props.packPath || props.routePath || props.packUrl || "zopack";
 
     try {
       const response = await fetch(props.apiPath ?? "/api/zopack-live-edit", {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({
-          input: `${prompt}\n\nDesired full pack markdown after the edit:\n\`\`\`markdown\n${updatedMarkdown.trimEnd()}\n\`\`\``,
+          pack_markdown: rawMarkdown,
+          pack_file_path: props.packFilePath,
+          pack_name: packName,
+          pack_path: props.packPath ?? props.routePath ?? props.packUrl,
+          target_path: selectedRoute.path,
+          target_route_type: selectedRoute.route_type,
+          before_code: selectedRoute.code,
+          after_code: nextCode,
           conversation_id: conversationId,
         }),
       });
@@ -301,7 +300,7 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm text-slate-300">
             <div className="font-medium text-slate-100">Run behavior</div>
-            <div className="mt-1 leading-6">The run button sends the edited route back through your Zo API route, asks Zo to update the pack file in place, and refreshes the page when the edit completes.</div>
+            <div className="mt-1 leading-6">The run button sends the edited route back through your Zo API route, asks Zo to confirm the exact pack edit, writes the file on the server, and refreshes the page when the edit completes.</div>
             {status ? <div className="mt-2 text-emerald-300">{status}</div> : null}
             {error ? <div className="mt-2 text-red-300">{error}</div> : null}
           </div>
@@ -340,3 +339,5 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
     </div>
   );
 }
+
+export const ZoElement = ZopackLiveEditor;

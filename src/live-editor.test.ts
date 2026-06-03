@@ -64,11 +64,13 @@ describe("buildZoLiveEditPrompt", () => {
       afterCode: `export default async function handler(c) {
   return c.json({ message: "updated" });
 }`,
+      updatedPackMarkdown: PACK.replace("hello", "updated"),
     });
 
     expect(prompt).toContain("sample");
     expect(prompt).toContain("Inbox/sample.zopack.md");
     expect(prompt).toContain("/api/hello");
     expect(prompt).toContain(`message: "updated"`);
+    expect(prompt).toContain("Expected updated pack markdown");
   });
 });
