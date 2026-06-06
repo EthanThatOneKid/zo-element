@@ -49,6 +49,7 @@ describe("replacePackRouteCode", () => {
     expect(next).toContain(`message: "updated"`);
     expect(next).toContain(`return <main>hello</main>;`);
     expect(next).toContain(`### \`/\` (page, public)`);
+    expect(next).toContain("```typescript\nexport default async function handler(c) {\n  return c.json({ message: \"updated\" });\n}\n```");
   });
 });
 

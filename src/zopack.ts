@@ -26,12 +26,13 @@ function escapeRegExp(value: string): string {
 export function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const normalized = normalizeLineEndings(content);
   const meta: Record<string, string> = {};
-  if (!normalized.startsWith("---")) return { meta, body: normalized };
+  const lines = normalized.split("\n");
+  if (lines[0]?.trim() !== "---") return { meta, body: normalized };
 
-  const endIndex = normalized.indexOf("---", 3);
-  if (endIndex === -1) return { meta, body: normalized };
+  const endLineIndex = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (endLineIndex === -1) return { meta, body: normalized };
 
-  const frontmatter = normalized.slice(3, endIndex).trim();
+  const frontmatter = lines.slice(1, endLineIndex).join("\n").trim();
   for (const line of frontmatter.split("\n")) {
     const colonIndex = line.indexOf(":");
     if (colonIndex === -1) continue;
@@ -44,7 +45,7 @@ export function parseFrontmatter(content: string): { meta: Record<string, string
     meta[key] = value;
   }
 
-  return { meta, body: normalized.slice(endIndex + 3).trim() };
+  return { meta, body: lines.slice(endLineIndex + 1).join("\n").trim() };
 }
 
 export function parsePackFromContent(rawMarkdown: string): ParsedPack {
@@ -69,7 +70,7 @@ export function parsePackFromContent(rawMarkdown: string): ParsedPack {
     const sectionStart = header.index;
     const sectionEnd = index < headers.length - 1 ? headers[index + 1].index : body.length;
     const section = body.slice(sectionStart, sectionEnd);
-    const codeMatch = section.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)```/);
+    const codeMatch = section.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)\n```/);
     if (!codeMatch) continue;
 
     routes.push({
@@ -100,12 +101,16 @@ export function replacePackRouteCode(rawMarkdown: string, target: PackRouteTarge
   const nextHeaderMatch = /^\s*###\s+/m.exec(normalized.slice(restStart));
   const sectionEnd = nextHeaderMatch ? restStart + nextHeaderMatch.index : normalized.length;
   const section = normalized.slice(sectionStart, sectionEnd);
-  const codeBlockMatch = section.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)```/);
+  const codeBlockMatch = section.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)\n```/);
 
   if (!codeBlockMatch) {
     throw new Error(`Could not find code block for ${target.path} (${target.route_type})`);
   }
 
-  const updatedSection = section.replace(codeBlockMatch[1], nextCode.trimEnd());
+  const updatedCodeBlock = codeBlockMatch[0].replace(codeBlockMatch[1], nextCode.trimEnd());
+  const updatedSection =
+    section.slice(0, codeBlockMatch.index) +
+    updatedCodeBlock +
+    section.slice((codeBlockMatch.index ?? 0) + codeBlockMatch[0].length);
   return normalized.slice(0, sectionStart) + updatedSection + normalized.slice(sectionEnd);
 }

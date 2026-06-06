@@ -37,9 +37,14 @@ function usePackSource(packMarkdown?: string, packUrl?: string) {
       return;
     }
 
-    if (!packUrl) return;
+    if (!packUrl) {
+      setRawMarkdown("");
+      setLoadError(null);
+      return;
+    }
 
     let cancelled = false;
+    setRawMarkdown("");
     setLoadError(null);
 
     void (async () => {
