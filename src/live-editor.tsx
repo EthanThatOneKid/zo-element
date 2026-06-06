@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ZopackContext, type ZopackContextValue, type ZopackStatus } from "./zopack-context";
+import { ZopackIndicator } from "./zopack-indicator";
 import { parsePackFromContent, type ParsedPack, type ParsedRoute } from "./zopack";
 
 export interface ZoLiveEditProps {
@@ -24,6 +26,22 @@ function routeKey(route: Pick<ParsedRoute, "path" | "route_type">): string {
 
 function routeLanguage(routeType: RouteType): "ts" | "tsx" {
   return routeType === "page" ? "tsx" : "ts";
+}
+
+export function resolveZopackStatus(args: {
+  hasInlinePack: boolean;
+  hasPackUrl: boolean;
+  rawMarkdown: string;
+  loadError: string | null;
+  parsedPack: ParsedPack | { error: string } | null;
+  running: boolean;
+  error: string | null;
+}): ZopackStatus {
+  if (args.running) return "saving";
+  if (args.error || args.loadError) return "error";
+  if (!args.rawMarkdown.trim()) return args.hasPackUrl && !args.hasInlinePack ? "loading" : "idle";
+  if (!isParsedPack(args.parsedPack)) return "error";
+  return "ready";
 }
 
 function usePackSource(packMarkdown?: string, packUrl?: string) {
@@ -164,7 +182,7 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState("");
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const routes = isParsedPack(plan) ? plan.routes : [];
@@ -182,12 +200,12 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
     if (selectedRouteIndex >= routes.length) setSelectedRouteIndex(0);
   }, [routes.length, selectedRouteIndex]);
 
-  async function runEdit() {
+  const runEdit = useCallback(async () => {
     if (!selectedRoute || !selectedKey || !rawMarkdown.trim() || !isParsedPack(plan)) return;
 
     setRunning(true);
     setError(null);
-    setStatus("Sending edit to Zo...");
+    setNotice("Sending edit to Zo...");
 
     const nextCode = drafts[selectedKey] ?? selectedRoute.code;
     const packName = plan.meta.name || props.packPath || props.routePath || props.packUrl || "zopack";
@@ -213,18 +231,43 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
       if (!response.ok) throw new Error(payload?.error || `Zo edit failed with status ${response.status}`);
       if (payload && typeof payload.conversation_id === "string") setConversationId(payload.conversation_id);
 
-      setStatus("Zo replied. Refreshing...");
+      setNotice("Zo replied. Refreshing...");
       window.setTimeout(() => window.location.reload(), 600);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : String(runError));
-      setStatus("");
+      setNotice("");
     } finally {
       setRunning(false);
     }
-  }
+  }, [conversationId, drafts, plan, props.apiPath, props.packFilePath, props.packPath, props.packUrl, props.routePath, rawMarkdown, selectedKey, selectedRoute]);
+
+  const contextValue = useMemo<ZopackContextValue>(() => {
+    const label = props.openLabel || "Open live editor";
+    return {
+      isOpen: open,
+      label,
+      status: resolveZopackStatus({
+        hasInlinePack: typeof props.packMarkdown === "string" && props.packMarkdown.trim().length > 0,
+        hasPackUrl: typeof props.packUrl === "string" && props.packUrl.trim().length > 0,
+        rawMarkdown,
+        loadError,
+        parsedPack: plan,
+        running,
+        error,
+      }),
+      error,
+      openPanel: () => setOpen(true),
+      closePanel: () => setOpen(false),
+      togglePanel: () => setOpen((value) => !value),
+    };
+  }, [error, loadError, open, plan, props.openLabel, props.packMarkdown, props.packUrl, rawMarkdown, running]);
 
   const body = (() => {
     if (!rawMarkdown.trim()) {
+      if (!props.packUrl && typeof props.packMarkdown !== "string") {
+        return <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-300">No pack source configured. Pass `packMarkdown` or `packUrl` to load a pack.</div>;
+      }
+
       return (
         <div className="rounded-2xl border border-dashed border-white/15 bg-slate-950/60 p-4 text-sm text-slate-300">
           {loadError ? `Failed to load pack: ${loadError}` : "Loading pack markdown. If you provided packUrl, make sure it is reachable from this page."}
@@ -306,7 +349,7 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
           <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm text-slate-300">
             <div className="font-medium text-slate-100">Run behavior</div>
             <div className="mt-1 leading-6">The run button sends the edited route back through your Zo API route, asks Zo to confirm the exact pack edit, writes the file on the server, and refreshes the page when the edit completes.</div>
-            {status ? <div className="mt-2 text-emerald-300">{status}</div> : null}
+            {notice ? <div className="mt-2 text-emerald-300">{notice}</div> : null}
             {error ? <div className="mt-2 text-red-300">{error}</div> : null}
           </div>
         </section>
@@ -314,33 +357,36 @@ export function ZopackLiveEditor(props: ZoLiveEditProps) {
     );
   })();
 
+  const renderPanel = useCallback(
+    (context: ZopackContextValue) => (
+      <div className="flex h-full min-h-[360px] flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/95 p-4 text-slate-100 shadow-2xl shadow-black/30 backdrop-blur md:p-5">
+        <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3">
+          <div>
+            <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Zo live editor</div>
+            <div className="text-sm text-slate-200">Edit the pack file, send the change to Zo, then refresh.</div>
+          </div>
+          <button
+            type="button"
+            onClick={context.closePanel}
+            className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/5"
+          >
+            Hide
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto pb-4">{body}</div>
+      </div>
+    ),
+    [body],
+  );
+
+  const context = useMemo(() => contextValue, [contextValue]);
+
   return (
     <div className={props.className}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="fixed bottom-6 right-6 z-[60] rounded-full bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 shadow-2xl shadow-emerald-500/20 transition hover:bg-emerald-300"
-      >
-        {open ? "Close editor" : props.openLabel || "Open live editor"}
-      </button>
-
-      {open ? (
-        <div className="fixed inset-y-0 right-0 z-[50] w-full max-w-[min(100vw,92rem)] border-l border-white/10 bg-slate-950/95 backdrop-blur">
-          <div className="flex h-full flex-col gap-4 p-4 md:p-5">
-            <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3">
-              <div>
-                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Zo live editor</div>
-                <div className="text-sm text-slate-200">Edit the pack file, send the change to Zo, then refresh.</div>
-              </div>
-              <button type="button" onClick={() => setOpen(false)} className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/5">
-                Hide
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-auto pb-4">{body}</div>
-          </div>
-        </div>
-      ) : null}
+      <ZopackContext.Provider value={context}>
+        <ZopackIndicator renderPanel={renderPanel} />
+      </ZopackContext.Provider>
     </div>
   );
 }

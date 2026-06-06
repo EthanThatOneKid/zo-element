@@ -2,7 +2,9 @@
 
 Drop-in live editing UI for Zo spaces backed by `.zopack.md` files.
 
-The goal is a Glitch/CodePen-style side panel that can be imported into any Zo space. It reads route files from a zopack markdown file, lets the owner edit a route in-browser, sends the patch to the owner's Zo through `/zo/ask`, writes the updated `.zopack.md` back to disk when allowed, and refreshes when Zo confirms the edit.
+The editor now uses a floating Pegasus indicator inspired by Next.js devtools: click it to open the panel, drag the indicator to a different corner, and the chosen corner is remembered in `localStorage`.
+
+The goal is a Glitch/CodePen-style editing surface that can be imported into any Zo space. It reads route files from a zopack markdown file, lets the owner edit a route in-browser, sends the patch to the owner's Zo through `/zo/ask`, writes the updated `.zopack.md` back to disk when allowed, and refreshes when Zo confirms the edit.
 
 ## Install in a Zo space
 
@@ -41,7 +43,7 @@ Props:
 - `routePath`: compatibility alias for `packPath` in drop-in demos.
 - `packFilePath`: writable workspace file path that receives the confirmed pack update.
 - `apiPath`: same-origin API route. Defaults to `/api/zopack-live-edit`.
-- `openLabel`: text for the floating editor button.
+- `openLabel`: label used for the indicator button when the editor is closed.
 - `className`: optional wrapper class.
 
 ### `handleZoLiveEditRequest(c)`
@@ -53,11 +55,12 @@ Hono handler for forwarding edit prompts to `https://api.zo.computer/zo/ask` usi
 - `parsePackFromContent(markdown)`
 - `replacePackRouteCode(markdown, target, nextCode)`
 - `buildZoLiveEditPrompt(args)`
+- `resolveZopackStatus(args)`
+- `describeZopackStatus(status)`
 
 ## Development
 
 ```bash
-bun install
 bun test
 bun run typecheck
 ```

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildZoLiveEditPrompt, parsePackFromContent, replacePackRouteCode } from "./index";
+import {
+  buildZoLiveEditPrompt,
+  describeZopackStatus,
+  parsePackFromContent,
+  replacePackRouteCode,
+  resolveZopackStatus,
+} from "./index";
 
 const PACK = `---
 format: zopack
@@ -42,9 +48,13 @@ describe("parsePackFromContent", () => {
 
 describe("replacePackRouteCode", () => {
   test("updates a single route block and preserves the rest of the pack", () => {
-    const next = replacePackRouteCode(PACK, { path: "/api/hello", route_type: "api" }, `export default async function handler(c) {
+    const next = replacePackRouteCode(
+      PACK,
+      { path: "/api/hello", route_type: "api" },
+      `export default async function handler(c) {
   return c.json({ message: "updated" });
-}`);
+}`,
+    );
 
     expect(next).toContain(`message: "updated"`);
     expect(next).toContain(`return <main>hello</main>;`);
@@ -73,5 +83,65 @@ describe("buildZoLiveEditPrompt", () => {
     expect(prompt).toContain("/api/hello");
     expect(prompt).toContain(`message: "updated"`);
     expect(prompt).toContain("Expected updated pack markdown");
+  });
+});
+
+describe("describeZopackStatus", () => {
+  test("maps status states to badge metadata", () => {
+    expect(describeZopackStatus("idle")).toEqual({ label: "Idle", color: "#64748b", pulse: false });
+    expect(describeZopackStatus("loading")).toEqual({ label: "Loading", color: "#d8a657", pulse: true });
+    expect(describeZopackStatus("error")).toEqual({ label: "Error", color: "#dc2626", pulse: false });
+  });
+});
+
+describe("resolveZopackStatus", () => {
+  test("prioritizes loading, saving, and error states", () => {
+    expect(
+      resolveZopackStatus({
+        hasInlinePack: false,
+        hasPackUrl: true,
+        rawMarkdown: "",
+        loadError: null,
+        parsedPack: null,
+        running: false,
+        error: null,
+      }),
+    ).toBe("loading");
+
+    expect(
+      resolveZopackStatus({
+        hasInlinePack: true,
+        hasPackUrl: false,
+        rawMarkdown: PACK,
+        loadError: null,
+        parsedPack: parsePackFromContent(PACK),
+        running: false,
+        error: null,
+      }),
+    ).toBe("ready");
+
+    expect(
+      resolveZopackStatus({
+        hasInlinePack: true,
+        hasPackUrl: false,
+        rawMarkdown: PACK,
+        loadError: null,
+        parsedPack: parsePackFromContent(PACK),
+        running: true,
+        error: null,
+      }),
+    ).toBe("saving");
+
+    expect(
+      resolveZopackStatus({
+        hasInlinePack: true,
+        hasPackUrl: false,
+        rawMarkdown: PACK,
+        loadError: null,
+        parsedPack: { error: "bad markdown" },
+        running: false,
+        error: null,
+      }),
+    ).toBe("error");
   });
 });
