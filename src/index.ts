@@ -1,4 +1,4 @@
-export { handleZoLiveEditRequest } from "./api";
+export { handleZoLiveEditRequest, isZoLiveEditAuthorized } from "./api";
 export { ZoElement, ZopackLiveEditor, resolveZopackStatus } from "./live-editor";
 export { buildZoLiveEditPrompt } from "./prompt";
 export { ZopackContext, describeZopackStatus, type Corner, type ZopackContextValue, type ZopackStatus } from "./zopack-context";

@@ -23,6 +23,82 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Walks `body` and yields the character index of every `### ` line that is NOT
+ * inside a fenced code block. Route headers at any other position (inside
+ * code, inside inline backticks that don't open a fence) are ignored.
+ */
+function findRouteHeaderIndices(body: string): number[] {
+  const indices: number[] = [];
+  let cursor = 0;
+  let inFence = false;
+  let fenceMarker = "";
+
+  while (cursor < body.length) {
+    if (!inFence) {
+      // Look for the next triple-backtick fence opener.
+      const openerMatch = /```[^\n]*\n?/.exec(body.slice(cursor));
+      const headerMatch = /^###\s+/m.exec(body.slice(cursor));
+      const openerIdx = openerMatch ? openerMatch.index : -1;
+      const headerIdx = headerMatch ? headerMatch.index : -1;
+
+      if (headerIdx === -1) return indices;
+      if (openerIdx !== -1 && openerIdx < headerIdx) {
+        // Header is after a fence opener — the header is inside the fence.
+        cursor += openerIdx + openerMatch![0].length;
+        inFence = true;
+        fenceMarker = "```";
+        continue;
+      }
+      // Header is before any fence opener — record it.
+      indices.push(cursor + headerIdx);
+      cursor += headerIdx + headerMatch![0].length;
+    } else {
+      // We're inside a fence; look for the matching closing fence.
+      const closer = body.indexOf("\n```", cursor);
+      if (closer === -1) {
+        // Unterminated fence — the rest of the file is the fence body.
+        return indices;
+      }
+      cursor = closer + 4; // skip past "\n```"
+      inFence = false;
+      fenceMarker = "";
+    }
+  }
+
+  return indices;
+}
+
+function buildRouteHeaderRegex(target: PackRouteTarget): RegExp {
+  // Matches the exact line that opens a route section. We escape the path so
+  // user-controlled route paths (e.g. "/api/v1/:id") are matched literally.
+  // The opening backticks and parens are escaped as plain regex characters.
+  const pathPart = "`" + escapeRegExp(target.path) + "`";
+  return new RegExp(
+    `^###\\s+${pathPart}\\s+\\((${target.route_type}),\\s*(public|private)\\)\\s*$`,
+    "m",
+  );
+}
+
+function findRouteHeaderAt(body: string, target: PackRouteTarget): number | null {
+  const indices = findRouteHeaderIndices(body);
+  const headerRegex = buildRouteHeaderRegex(target);
+  for (const startIndex of indices) {
+    const tail = body.slice(startIndex);
+    const match = headerRegex.exec(tail);
+    if (match && match.index === 0) return startIndex;
+  }
+  return null;
+}
+
+function findNextRouteHeaderAfter(body: string, afterIndex: number): number | null {
+  const indices = findRouteHeaderIndices(body);
+  for (const startIndex of indices) {
+    if (startIndex >= afterIndex) return startIndex;
+  }
+  return null;
+}
+
 export function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const normalized = normalizeLineEndings(content);
   const meta: Record<string, string> = {};
@@ -55,28 +131,29 @@ export function parsePackFromContent(rawMarkdown: string): ParsedPack {
   }
 
   const routes: ParsedRoute[] = [];
-  const headers: Array<{ path: string; type: string; visibility: string; index: number }> = [];
-  const routeHeaderRegex = /^###\s+`([^`]+)`\s+\((\w+),\s*(\w+)\)/gm;
-  let match: RegExpExecArray | null;
+  const headerIndices = findRouteHeaderIndices(body);
+  const routeHeaderRegex = /^###\s+`([^`]+)`\s+\((\w+),\s*(\w+)\)/m;
 
-  while ((match = routeHeaderRegex.exec(body)) !== null) {
-    headers.push({ path: match[1], type: match[2], visibility: match[3], index: match.index });
-  }
+  for (let index = 0; index < headerIndices.length; index += 1) {
+    const sectionStart = headerIndices[index];
+    const sectionEnd = index < headerIndices.length - 1 ? headerIndices[index + 1] : body.length;
+    const headerMatch = routeHeaderRegex.exec(body.slice(sectionStart));
+    if (!headerMatch) continue;
+    const headerEnd = sectionStart + headerMatch[0].length;
+    if (headerEnd > sectionEnd) continue;
+    const path = headerMatch[1];
+    const routeType = headerMatch[2];
+    const visibility = headerMatch[3];
+    if (routeType !== "api" && routeType !== "page") continue;
 
-  for (let index = 0; index < headers.length; index += 1) {
-    const header = headers[index];
-    if (header.type !== "api" && header.type !== "page") continue;
-
-    const sectionStart = header.index;
-    const sectionEnd = index < headers.length - 1 ? headers[index + 1].index : body.length;
-    const section = body.slice(sectionStart, sectionEnd);
+    const section = body.slice(headerEnd, sectionEnd);
     const codeMatch = section.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)\n```/);
     if (!codeMatch) continue;
 
     routes.push({
-      path: header.path,
-      route_type: header.type,
-      public: header.visibility === "public",
+      path,
+      route_type: routeType,
+      public: visibility === "public",
       code: codeMatch[1].trimEnd(),
     });
   }
@@ -86,31 +163,32 @@ export function parsePackFromContent(rawMarkdown: string): ParsedPack {
 
 export function replacePackRouteCode(rawMarkdown: string, target: PackRouteTarget, nextCode: string): string {
   const normalized = normalizeLineEndings(rawMarkdown);
-  const headerRegex = new RegExp(
-    String.raw`^###\s+\`${escapeRegExp(target.path)}\`\s+\(${target.route_type},\s*(public|private)\)\s*$`,
-    "m",
-  );
-
-  const headerMatch = headerRegex.exec(normalized);
-  if (!headerMatch) {
+  const sectionStart = findRouteHeaderAt(normalized, target);
+  if (sectionStart === null) {
     throw new Error(`Could not find route section for ${target.path} (${target.route_type})`);
   }
 
-  const sectionStart = headerMatch.index;
-  const restStart = sectionStart + headerMatch[0].length;
-  const nextHeaderMatch = /^\s*###\s+/m.exec(normalized.slice(restStart));
-  const sectionEnd = nextHeaderMatch ? restStart + nextHeaderMatch.index : normalized.length;
-  const section = normalized.slice(sectionStart, sectionEnd);
-  const codeBlockMatch = section.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)\n```/);
+  const headerRegex = buildRouteHeaderRegex(target);
+  const section = normalized.slice(sectionStart);
+  const headerMatch = headerRegex.exec(section);
+  if (!headerMatch || headerMatch.index !== 0) {
+    throw new Error(`Could not find route section for ${target.path} (${target.route_type})`);
+  }
+  const headerEnd = sectionStart + headerMatch[0].length;
+
+  const nextHeaderIndex = findNextRouteHeaderAfter(normalized, headerEnd);
+  const sectionEnd = nextHeaderIndex ?? normalized.length;
+  const sectionBody = normalized.slice(headerEnd, sectionEnd);
+  const codeBlockMatch = sectionBody.match(/```(?:typescript|tsx|ts)\n([\s\S]*?)\n```/);
 
   if (!codeBlockMatch) {
     throw new Error(`Could not find code block for ${target.path} (${target.route_type})`);
   }
 
   const updatedCodeBlock = codeBlockMatch[0].replace(codeBlockMatch[1], nextCode.trimEnd());
-  const updatedSection =
-    section.slice(0, codeBlockMatch.index) +
+  const updatedSectionBody =
+    sectionBody.slice(0, codeBlockMatch.index) +
     updatedCodeBlock +
-    section.slice((codeBlockMatch.index ?? 0) + codeBlockMatch[0].length);
-  return normalized.slice(0, sectionStart) + updatedSection + normalized.slice(sectionEnd);
+    sectionBody.slice((codeBlockMatch.index ?? 0) + codeBlockMatch[0].length);
+  return normalized.slice(0, headerEnd) + updatedSectionBody + normalized.slice(sectionEnd);
 }

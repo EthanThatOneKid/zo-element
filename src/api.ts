@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
 import { buildZoLiveEditPrompt } from "./prompt";
 import { replacePackRouteCode, type ParsedRoute } from "./zopack";
@@ -32,7 +33,46 @@ function normalizeNewlines(value: string): string {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
 }
 
+function constantTimeEqualString(a: string, b: string): boolean {
+  const aBytes = Buffer.from(a);
+  const bBytes = Buffer.from(b);
+  if (aBytes.length !== bBytes.length) return false;
+  return timingSafeEqual(aBytes, bBytes);
+}
+
+/**
+ * Returns true when the request is authorized.
+ *
+ * When `ZO_ELEMENT_API_SECRET` is set on the server, the caller must send
+ * `Authorization: Bearer <secret>` with a constant-time-matching token.
+ * When it is not set, the route is treated as open (preserves the easy
+ * demo path; production deployments should always set the secret).
+ */
+export function isZoLiveEditAuthorized(c: Context): boolean {
+  const secret = process.env.ZO_ELEMENT_API_SECRET;
+  if (!secret) return true;
+  const header = c.req.header("authorization");
+  if (!header || !header.startsWith("Bearer ")) return false;
+  return constantTimeEqualString(header.slice(7), secret);
+}
+
+async function persistUpdatedPack(packFilePath: string, nextMarkdown: string): Promise<void> {
+  try {
+    await mkdir(dirname(packFilePath), { recursive: true });
+    await Bun.write(packFilePath, nextMarkdown);
+  } catch (cause) {
+    throw new Error(
+      `Failed to persist pack to ${packFilePath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+  }
+}
+
 export async function handleZoLiveEditRequest(c: Context): Promise<Response> {
+  if (!isZoLiveEditAuthorized(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
   const apiKey = process.env.ZO_API_KEY;
   const body = (await c.req.json().catch(() => null)) as ZoLiveEditRequestBody | null;
   if (
@@ -60,8 +100,11 @@ export async function handleZoLiveEditRequest(c: Context): Promise<Response> {
 
   if (!apiKey) {
     if (typeof body.pack_file_path === "string" && body.pack_file_path.trim().length > 0) {
-      await mkdir(dirname(body.pack_file_path), { recursive: true });
-      await Bun.write(body.pack_file_path, nextMarkdown);
+      try {
+        await persistUpdatedPack(body.pack_file_path, nextMarkdown);
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
+      }
     }
 
     return c.json({
@@ -123,8 +166,11 @@ export async function handleZoLiveEditRequest(c: Context): Promise<Response> {
   }
 
   if (typeof body.pack_file_path === "string" && body.pack_file_path.trim().length > 0) {
-    await mkdir(dirname(body.pack_file_path), { recursive: true });
-    await Bun.write(body.pack_file_path, nextMarkdown);
+    try {
+      await persistUpdatedPack(body.pack_file_path, nextMarkdown);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
   }
 
   return c.json({

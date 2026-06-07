@@ -31,6 +31,19 @@ Set `ZO_API_KEY` in Zo's Settings > Advanced secrets. The browser never receives
 
 If you want the edit to persist, point `packFilePath` at a writable file under `/home/workspace` and serve the current pack from a GET route such as `/api/zo-element-pack`.
 
+### Securing the API route
+
+By default the API route is open on the same origin. To require a bearer token, set `ZO_ELEMENT_API_SECRET` (also in Settings > Advanced) and include the header in requests:
+
+```ts
+fetch("/api/zopack-live-edit", {
+  headers: { authorization: `Bearer ${secret}` },
+  // ...rest of the request
+});
+```
+
+The `isZoLiveEditAuthorized(c)` helper is exported for Hono middleware that wants to expose the same gate.
+
 ## API
 
 ### `ZoElement` / `ZopackLiveEditor`
